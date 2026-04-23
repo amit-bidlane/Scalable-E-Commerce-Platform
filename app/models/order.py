@@ -26,7 +26,7 @@ class Order(TimestampMixin, Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True)
     status: Mapped[OrderState] = mapped_column(
-        Enum(OrderState, name="order_state"),
+        Enum(OrderState, name="order_state", create_type=False),
         nullable=False,
         default=OrderState.PENDING,
         server_default=OrderState.PENDING.value,

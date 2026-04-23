@@ -15,13 +15,22 @@ branch_labels = None
 depends_on = None
 
 
-user_role = sa.Enum("admin", "customer", name="user_role")
-order_state = sa.Enum("PENDING", "PAID", "SHIPPED", name="order_state")
-
 
 def upgrade() -> None:
-    user_role.create(op.get_bind(), checkfirst=True)
-    order_state.create(op.get_bind(), checkfirst=True)
+    op.execute("""
+    DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'user_role') THEN
+            CREATE TYPE user_role AS ENUM ('admin', 'customer');
+        END IF;
+    END $$;
+    """)
+    op.execute("""
+    DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'order_state') THEN
+            CREATE TYPE order_state AS ENUM ('PENDING', 'PAID', 'SHIPPED');
+        END IF;
+    END $$;
+    """)
 
     op.create_table(
         "users",
@@ -29,7 +38,7 @@ def upgrade() -> None:
         sa.Column("email", sa.String(length=255), nullable=False),
         sa.Column("hashed_password", sa.String(length=255), nullable=False),
         sa.Column("full_name", sa.String(length=255), nullable=True),
-        sa.Column("role", user_role, nullable=False, server_default="customer"),
+        sa.Column("role", sa.Enum("admin", "customer", name="user_role", create_type=False), nullable=False, server_default="customer"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
@@ -96,7 +105,7 @@ def upgrade() -> None:
         "orders",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("status", order_state, nullable=False, server_default="PENDING"),
+        sa.Column("status", sa.Enum("PENDING", "PAID", "SHIPPED", name="order_state", create_type=False), nullable=False, server_default="PENDING"),
         sa.Column("total_amount", sa.Numeric(10, 2), nullable=False),
         sa.Column("shipping_address", sa.String(length=500), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -134,5 +143,5 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_users_id"), table_name="users")
     op.drop_index(op.f("ix_users_email"), table_name="users")
     op.drop_table("users")
-    order_state.drop(op.get_bind(), checkfirst=True)
-    user_role.drop(op.get_bind(), checkfirst=True)
+    op.execute("DROP TYPE IF EXISTS order_state")
+    op.execute("DROP TYPE IF EXISTS user_role")
