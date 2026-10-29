@@ -9,9 +9,11 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml /code/pyproject.toml
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir .
+COPY pyproject.toml uv.lock /code/
+RUN pip install --no-cache-dir uv \
+    && uv sync --frozen --no-dev --no-install-project
+
+ENV PATH="/code/.venv/bin:$PATH"
 
 COPY . /code
 
