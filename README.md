@@ -1,6 +1,6 @@
 # Scalable E-Commerce Platform
 
-Production-ready FastAPI backend for a scalable e-commerce platform with:
+FastAPI e-commerce backend, work in progress, with:
 
 - JWT auth with refresh tokens and RBAC
 - PostgreSQL with async SQLAlchemy 2.0 and Alembic migrations
@@ -114,8 +114,8 @@ Coverage is enforced through `pyproject.toml` with:
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/refresh`
-- `GET /api/v1/auth/google/login`
-- `POST /api/v1/auth/google/callback`
+- `GET /api/v1/auth/google/login` (planned, not finished)
+- `POST /api/v1/auth/google/callback` (planned, not finished)
 - `GET /api/v1/auth/me`
 
 ### Products
@@ -170,7 +170,7 @@ Application logs are JSON formatted and ready for ELK-style ingestion.
 
 ### Nginx
 
-The reverse proxy config is in [nginx/nginx.conf](</e:/Job Resumes/Job Ready Projects/Scalable E-Commerce Platform/nginx/nginx.conf:1>).
+The reverse proxy config is in [nginx/nginx.conf](nginx/nginx.conf).
 
 To enable the edge profile:
 
@@ -187,7 +187,7 @@ Before enabling HTTPS, place certificates at:
 
 GitHub Actions workflow:
 
-- [deploy.yml](</e:/Job Resumes/Job Ready Projects/Scalable E-Commerce Platform/.github/workflows/deploy.yml:1>)
+- [deploy.yml](.github/workflows/deploy.yml)
 
 Pipeline stages:
 
