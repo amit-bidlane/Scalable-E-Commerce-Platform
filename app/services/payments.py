@@ -2,7 +2,7 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 import razorpay
@@ -110,6 +110,13 @@ async def process_payment_webhook(
         order, provider_payment_id = await _resolve_order_from_event(normalized_provider, event, session)
         if order.status == OrderState.PAID:
             return False, "Order already marked as paid."
+
+        if not _payment_matches_order(normalized_provider, event, order):
+            logger.warning(
+                "Payment amount or currency does not match the order.",
+                extra={"order_id": order.id, "payment_provider": normalized_provider},
+            )
+            return False, "Payment amount or currency does not match the order."
 
         order.status = OrderState.PAID
         order.provider_payment_id = provider_payment_id
@@ -295,6 +302,28 @@ async def _get_cart_for_checkout(session: AsyncSession, user_id: int) -> Cart:
     if cart is None or not cart.items:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cart is empty.")
     return cart
+
+
+def _payment_matches_order(provider: str, event: dict[str, Any], order: Order) -> bool:
+    if provider == "stripe":
+        entity = event.get("data", {}).get("object", {})
+    else:
+        entity = event.get("payload", {}).get("payment", {}).get("entity", {})
+
+    amount = entity.get("amount")
+    currency = entity.get("currency")
+    if amount is None or not currency:
+        return False
+
+    try:
+        provider_amount = Decimal(str(amount))
+    except (InvalidOperation, TypeError):
+        return False
+
+    return (
+        provider_amount == _payment_subunits(order.total_amount)
+        and str(currency).upper() == settings.payment_currency.upper()
+    )
 
 
 def _extract_payment_id(provider: str, event: dict[str, Any]) -> str | None:

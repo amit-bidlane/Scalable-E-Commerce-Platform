@@ -79,7 +79,7 @@ async def test_process_payment_webhook_marks_order_paid_and_publishes(monkeypatc
     async def fake_publish(order_obj):
         published["order_id"] = order_obj.id
 
-    monkeypatch.setattr(payment_service, "_verify_and_parse_webhook", lambda provider, payload, headers: {"id": "evt_2", "type": "payment_intent.succeeded"})
+    monkeypatch.setattr(payment_service, "_verify_and_parse_webhook", lambda provider, payload, headers: {"id": "evt_2", "type": "payment_intent.succeeded", "data": {"object": {"amount": 99999, "currency": "inr"}}})
     monkeypatch.setattr(payment_service, "redis_cache", FakeRedisCache(acquired=True))
     monkeypatch.setattr(payment_service, "_resolve_order_from_event", fake_resolve)
     monkeypatch.setattr(payment_service, "_fetch_order_with_user", fake_fetch_with_user)
@@ -99,6 +99,14 @@ async def test_process_payment_webhook_marks_order_paid_and_publishes(monkeypatc
     assert order.provider_payment_id == "pi_123"
     assert published["order_id"] == 15
     assert session.committed is True
+
+
+@pytest.mark.parametrize("amount", ["abc", None])
+def test_payment_matches_order_treats_bad_amount_as_mismatch(amount) -> None:
+    order = Order(id=15, total_amount=Decimal("999.99"))
+    event = {"data": {"object": {"amount": amount, "currency": "inr"}}}
+
+    assert payment_service._payment_matches_order("stripe", event, order) is False
 
 
 def test_extract_payment_id_for_razorpay() -> None:
