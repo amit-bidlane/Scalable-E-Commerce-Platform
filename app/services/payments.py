@@ -8,6 +8,7 @@ from typing import Any
 import razorpay
 import stripe
 from fastapi import HTTPException, status
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -91,11 +92,17 @@ async def process_payment_webhook(
 
     idempotency_key = _build_idempotency_key(normalized_provider, event)
 
-    acquired = await redis_cache.set_if_absent(
-        idempotency_key,
-        "processed",
-        ttl_seconds=settings.payment_webhook_idempotency_ttl_seconds,
-    )
+    try:
+        acquired = await redis_cache.set_if_absent(
+            idempotency_key,
+            "processed",
+            ttl_seconds=settings.payment_webhook_idempotency_ttl_seconds,
+        )
+    except RedisError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Webhook cannot be processed right now. Please retry.",
+        ) from exc
     if not acquired:
         return False, "Duplicate webhook ignored."
 
