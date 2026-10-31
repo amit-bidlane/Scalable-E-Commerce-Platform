@@ -110,6 +110,8 @@ async def process_payment_webhook(
         order, provider_payment_id = await _resolve_order_from_event(normalized_provider, event, session)
         if order.status == OrderState.PAID:
             return False, "Order already marked as paid."
+        if order.status != OrderState.PENDING:
+            return False, "Order is not waiting for payment."
 
         if not _payment_matches_order(normalized_provider, event, order):
             logger.warning(
@@ -267,7 +269,9 @@ async def _resolve_order_from_event(
     if not provider_order_id or not provider_payment_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Webhook payload is missing payment linkage.")
 
-    result = await session.execute(select(Order).where(Order.provider_order_id == provider_order_id))
+    result = await session.execute(
+        select(Order).where(Order.provider_order_id == provider_order_id).with_for_update()
+    )
     order = result.scalar_one_or_none()
     if order is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found for payment event.")
@@ -275,7 +279,7 @@ async def _resolve_order_from_event(
 
 
 async def _fetch_order_for_update(session: AsyncSession, *, order_id: int) -> Order:
-    result = await session.execute(select(Order).where(Order.id == order_id))
+    result = await session.execute(select(Order).where(Order.id == order_id).with_for_update())
     order = result.scalar_one_or_none()
     if order is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found.")

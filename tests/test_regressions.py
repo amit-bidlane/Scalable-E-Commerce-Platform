@@ -270,6 +270,64 @@ async def test_webhook_with_matching_amount_marks_order_paid(client, maker, live
     assert await order_status(maker, order_id) == "PAID"
 
 
+@pytest.fixture
+def published(monkeypatch):
+    """Collect the messages the app would publish to RabbitMQ."""
+    from app.core.messaging import rabbitmq_client
+
+    messages = []
+
+    async def fake_publish(message):
+        messages.append(message)
+
+    monkeypatch.setattr(rabbitmq_client, "publish", fake_publish)
+    return messages
+
+
+@pytest.mark.asyncio
+async def test_webhooks_for_one_payment_arriving_at_once_publish_one_notification(
+    client, maker, live_redis, published, monkeypatch
+) -> None:
+    """Five different events for the same payment (for example payment.captured and order.paid)
+    arrive together. Redis cannot catch them, because the event ids differ, so only the row
+    lock keeps this to one notification. Each request pauses after loading the order, so the
+    requests really overlap; without the lock they would all see PENDING."""
+    from app.services import payments
+
+    resolve = payments._resolve_order_from_event
+
+    async def slow_resolve(*args, **kwargs):
+        result = await resolve(*args, **kwargs)
+        await asyncio.sleep(0.2)
+        return result
+
+    monkeypatch.setattr(payments, "_resolve_order_from_event", slow_resolve)
+    order_id = await make_order(maker, total="500.00", provider_order_id="order_race")
+    body = razorpay_body(provider_order_id="order_race", payment_id="pay_race", amount_paise=50000)
+
+    responses = await asyncio.gather(*[post_webhook(client, body, f"evt_race_{i}") for i in range(5)])
+
+    assert [r.status_code for r in responses] == [200] * 5
+    assert await order_status(maker, order_id) == "PAID"
+    assert len(published) == 1
+
+
+@pytest.mark.asyncio
+async def test_same_webhook_event_delivered_twice_is_ignored(client, maker, live_redis, published) -> None:
+    order_id = await make_order(maker, total="500.00", provider_order_id="order_twice")
+    body = razorpay_body(provider_order_id="order_twice", payment_id="pay_twice", amount_paise=50000)
+
+    first = await post_webhook(client, body, "evt_twice")
+    second = await post_webhook(client, body, "evt_twice")
+
+    assert first.json()["processed"] is True
+    assert second.status_code == 200
+    assert second.json()["processed"] is False
+    assert second.json()["detail"] == "Duplicate webhook ignored."
+    assert await order_status(maker, order_id) == "PAID"
+    assert len(published) == 1
+
+
 @pytest.mark.asyncio
 async def test_webhook_with_bad_signature_is_rejected(client, maker, live_redis) -> None:
     """Guard: this already works. Keep it working."""
