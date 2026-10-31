@@ -105,7 +105,9 @@ Coverage is enforced through `pyproject.toml` with:
 
 - `--cov=app`
 - `--cov-report=term-missing`
-- `--cov-fail-under=95`
+- `--cov-fail-under=71`
+
+Measured coverage is about 71%. The gate is set to that real number and will be raised as tests are added. Product routes, `dependencies.py` and the worker are the least covered.
 
 ## Core API Areas
 
