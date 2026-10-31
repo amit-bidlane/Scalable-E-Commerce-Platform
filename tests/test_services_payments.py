@@ -4,6 +4,7 @@ import pytest
 from fastapi import HTTPException
 
 from app.models.order import Order, OrderState
+from app.models.user import User
 from app.services import payments as payment_service
 
 
@@ -65,7 +66,7 @@ async def test_process_payment_webhook_marks_order_paid_and_publishes(monkeypatc
         total_amount=Decimal("999.99"),
         shipping_address="42 Wallaby Way",
     )
-    order.user = type("UserStub", (), {"email": "buyer@example.com"})()
+    order.user = User(id=8, email="buyer@example.com", hashed_password="x")
 
     async def fake_resolve(provider, event, session):
         return order, "pi_123"
