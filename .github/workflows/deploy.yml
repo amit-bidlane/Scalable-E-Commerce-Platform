@@ -10,6 +10,51 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ecommerce_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ecommerce_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      PYTHON_VERSION: "3.11"
+      PROJECT_NAME: Scalable E-Commerce Platform
+      API_V1_STR: /api/v1
+      POSTGRES_SERVER: localhost
+      POSTGRES_PORT: "5432"
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: ecommerce_test
+      JWT_SECRET_KEY: test-secret
+      JWT_REFRESH_SECRET_KEY: test-refresh-secret
+      RATE_LIMIT_PER_MINUTE: "100"
+      REDIS_URL: redis://localhost:6379/0
+      PAYMENT_PROVIDER: razorpay
+      PAYMENT_CURRENCY: INR
+      ENABLE_METRICS: "true"
+      TEST_PG_HOST: localhost
+      TEST_PG_PORT: "5432"
+      TEST_PG_USER: postgres
+      TEST_PG_PASSWORD: postgres
+      TEST_PG_DB: ecommerce_test
+      TEST_REDIS_URL: redis://localhost:6379/5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -17,32 +62,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+      - name: Install uv
+        run: pip install uv==0.13.6
+
+      - name: Install dependencies from the lockfile
+        run: uv sync --frozen --extra dev --python "$PYTHON_VERSION"
+
+      - name: Apply migrations to the empty test database
+        run: uv run --no-sync alembic upgrade head
 
       - name: Run pytest with coverage gate
-        env:
-          PROJECT_NAME: Scalable E-Commerce Platform
-          API_V1_STR: /api/v1
-          POSTGRES_SERVER: localhost
-          POSTGRES_PORT: "5432"
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: ecommerce
-          JWT_SECRET_KEY: test-secret
-          JWT_REFRESH_SECRET_KEY: test-refresh-secret
-          RATE_LIMIT_PER_MINUTE: "100"
-          REDIS_URL: redis://localhost:6379/0
-          PAYMENT_PROVIDER: razorpay
-          PAYMENT_CURRENCY: INR
-          RABBITMQ_URL: amqp://guest:guest@localhost:5672/
-          NOTIFICATIONS_QUEUE: notifications_queue
-          ENABLE_METRICS: "true"
-        run: pytest
+        run: uv run --no-sync pytest
 
   docker:
     runs-on: ubuntu-latest
