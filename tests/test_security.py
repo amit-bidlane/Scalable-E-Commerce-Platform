@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
-from app.core.security import create_access_token, create_refresh_token
+from app.core.config import settings
+from app.core.security import create_access_token, create_refresh_token, decode_token
 from app.dependencies import get_current_user
 from app.main import app
 from app.models.user import User, UserRole
@@ -22,6 +23,16 @@ def test_refresh_token_pair_issued() -> None:
     assert access_token
     assert refresh_token
     assert access_token != refresh_token
+
+
+def test_tokens_created_back_to_back_are_different() -> None:
+    first = create_refresh_token("1")
+    second = create_refresh_token("1")
+
+    assert first != second
+    first_claims = decode_token(first, settings.jwt_refresh_secret_key)
+    second_claims = decode_token(second, settings.jwt_refresh_secret_key)
+    assert first_claims["jti"] != second_claims["jti"]
 
 
 def test_admin_product_route_rejects_customer() -> None:
