@@ -71,7 +71,7 @@ def test_login_route_returns_token_pair(monkeypatch) -> None:
 
 
 def test_refresh_route_rotates_tokens(monkeypatch) -> None:
-    def fake_refresh_access_token(refresh_token):
+    async def fake_refresh_access_token(refresh_token):
         assert refresh_token == "refresh-token"
         return {
             "access_token": "new-access",

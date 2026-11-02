@@ -76,13 +76,14 @@ async def test_authenticate_user_rejects_bad_password(monkeypatch) -> None:
     assert exc.value.status_code == 401
 
 
-def test_refresh_access_token_rejects_invalid_token(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_refresh_access_token_rejects_invalid_token(monkeypatch) -> None:
     def fake_decode_token(token, secret_key):
         raise ValueError("Invalid token")
 
     monkeypatch.setattr(auth_service, "decode_token", fake_decode_token)
 
     with pytest.raises(HTTPException) as exc:
-        auth_service.refresh_access_token("bad-token")
+        await auth_service.refresh_access_token("bad-token")
 
     assert exc.value.status_code == 401
