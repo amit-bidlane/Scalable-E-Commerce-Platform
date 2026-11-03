@@ -4,6 +4,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from redis.asyncio import Redis
+from redis.exceptions import RedisError
 
 from app.core.config import settings
 
@@ -61,13 +62,13 @@ class RedisCache:
 
     async def set_if_absent(self, key: str, value: str, ttl_seconds: int | None = None) -> bool:
         if self._client is None:
-            return False
+            raise RedisError("Redis is not connected.")
 
         try:
             return bool(await self._client.set(key, value, ex=ttl_seconds, nx=True))
-        except Exception:
+        except Exception as exc:
             logger.exception("Redis conditional set failed for key %s", key)
-            return False
+            raise RedisError("Redis conditional set failed.") from exc
 
 
 def get_product_list_cache_key(

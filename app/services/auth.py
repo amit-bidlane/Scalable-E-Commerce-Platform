@@ -1,10 +1,13 @@
+from datetime import UTC, datetime
 from urllib.parse import urlencode
 from uuid import uuid4
 
 from fastapi import HTTPException, status
+from redis.exceptions import RedisError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.cache import redis_cache
 from app.core.config import settings
 from app.core.security import (
     create_access_token,
@@ -26,7 +29,7 @@ async def register_user(payload: UserRegistrationRequest, session: AsyncSession)
         email=payload.email,
         hashed_password=get_password_hash(payload.password),
         full_name=payload.full_name,
-        role=payload.role or UserRole.CUSTOMER,
+        role=UserRole.CUSTOMER,
     )
     session.add(user)
     await session.commit()
@@ -55,7 +58,7 @@ def issue_token_pair(user: User) -> TokenPair:
     return TokenPair(access_token=access_token, refresh_token=refresh_token)
 
 
-def refresh_access_token(refresh_token: str) -> TokenPair:
+async def refresh_access_token(refresh_token: str) -> TokenPair:
     try:
         payload = decode_token(refresh_token, settings.jwt_refresh_secret_key)
     except ValueError as exc:
@@ -67,6 +70,22 @@ def refresh_access_token(refresh_token: str) -> TokenPair:
     subject = payload.get("sub")
     if subject is None:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token subject is missing.")
+
+    jti = payload.get("jti")
+    if jti is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token.")
+
+    # Claim the jti: only the first caller to set the key may refresh. The key expires with the token.
+    ttl_seconds = max(int(payload["exp"] - datetime.now(UTC).timestamp()), 1)
+    try:
+        first_use = await redis_cache.set_if_absent(f"auth:refresh_used:{jti}", "1", ttl_seconds=ttl_seconds)
+    except RedisError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Cannot refresh right now. Please retry.",
+        ) from exc
+    if not first_use:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token was already used.")
 
     access_token = create_access_token(subject=subject)
     new_refresh_token = create_refresh_token(subject=subject)

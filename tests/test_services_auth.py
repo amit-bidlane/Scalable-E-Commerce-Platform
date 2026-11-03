@@ -1,5 +1,6 @@
 import pytest
 from fastapi import HTTPException
+from redis.exceptions import RedisError
 
 from app.models.user import User, UserRole
 from app.schemas.auth import UserRegistrationRequest
@@ -34,6 +35,18 @@ class FakeSession:
 
     async def refresh(self, obj):
         self.refreshed = True
+
+
+class FakeRedisCache:
+    def __init__(self, error=None):
+        self.error = error
+        self.calls = []
+
+    async def set_if_absent(self, key, value, ttl_seconds=None):
+        self.calls.append(key)
+        if self.error is not None:
+            raise self.error
+        return True
 
 
 @pytest.mark.asyncio
@@ -76,13 +89,42 @@ async def test_authenticate_user_rejects_bad_password(monkeypatch) -> None:
     assert exc.value.status_code == 401
 
 
-def test_refresh_access_token_rejects_invalid_token(monkeypatch) -> None:
+@pytest.mark.asyncio
+async def test_refresh_access_token_rejects_invalid_token(monkeypatch) -> None:
     def fake_decode_token(token, secret_key):
         raise ValueError("Invalid token")
 
     monkeypatch.setattr(auth_service, "decode_token", fake_decode_token)
 
     with pytest.raises(HTTPException) as exc:
-        auth_service.refresh_access_token("bad-token")
+        await auth_service.refresh_access_token("bad-token")
 
     assert exc.value.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_refresh_access_token_rejects_token_without_jti(monkeypatch) -> None:
+    cache = FakeRedisCache()
+    monkeypatch.setattr(auth_service, "decode_token", lambda token, secret_key: {"type": "refresh", "sub": "1", "exp": 4102444800})
+    monkeypatch.setattr(auth_service, "redis_cache", cache)
+
+    with pytest.raises(HTTPException) as exc:
+        await auth_service.refresh_access_token("token-without-jti")
+
+    assert exc.value.status_code == 401
+    assert exc.value.detail == "Invalid refresh token."
+    assert cache.calls == []
+
+
+@pytest.mark.asyncio
+async def test_refresh_access_token_returns_503_when_redis_is_down(monkeypatch) -> None:
+    cache = FakeRedisCache(error=RedisError("down"))
+    monkeypatch.setattr(auth_service, "decode_token", lambda token, secret_key: {"type": "refresh", "sub": "1", "jti": "abc", "exp": 4102444800})
+    monkeypatch.setattr(auth_service, "redis_cache", cache)
+
+    with pytest.raises(HTTPException) as exc:
+        await auth_service.refresh_access_token("any-token")
+
+    assert exc.value.status_code == 503
+    assert exc.value.detail == "Cannot refresh right now. Please retry."
+    assert cache.calls == ["auth:refresh_used:abc"]

@@ -7,6 +7,7 @@ Create Date: 2026-04-23 00:00:00.000000
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 revision = "20260423_0001"
@@ -38,7 +39,7 @@ def upgrade() -> None:
         sa.Column("email", sa.String(length=255), nullable=False),
         sa.Column("hashed_password", sa.String(length=255), nullable=False),
         sa.Column("full_name", sa.String(length=255), nullable=True),
-        sa.Column("role", sa.Enum("admin", "customer", name="user_role", create_type=False), nullable=False, server_default="customer"),
+        sa.Column("role", postgresql.ENUM("admin", "customer", name="user_role", create_type=False), nullable=False, server_default="customer"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
     )
@@ -105,7 +106,7 @@ def upgrade() -> None:
         "orders",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="RESTRICT"), nullable=False),
-        sa.Column("status", sa.Enum("PENDING", "PAID", "SHIPPED", name="order_state", create_type=False), nullable=False, server_default="PENDING"),
+        sa.Column("status", postgresql.ENUM("PENDING", "PAID", "SHIPPED", name="order_state", create_type=False), nullable=False, server_default="PENDING"),
         sa.Column("total_amount", sa.Numeric(10, 2), nullable=False),
         sa.Column("shipping_address", sa.String(length=500), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),

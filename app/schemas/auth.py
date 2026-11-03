@@ -1,7 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models.user import UserRole
-
 
 class TokenPair(BaseModel):
     access_token: str
@@ -17,7 +15,6 @@ class UserRegistrationRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=8)
     full_name: str | None = None
-    role: UserRole | None = None
 
 
 class GoogleAuthURLResponse(BaseModel):

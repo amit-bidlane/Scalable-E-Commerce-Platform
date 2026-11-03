@@ -69,7 +69,7 @@ async def login(
 )
 @limiter.limit(public_rate_limit)
 async def refresh_token(request: Request, payload: RefreshTokenRequest) -> TokenPair:
-    return refresh_access_token(payload.refresh_token)
+    return await refresh_access_token(payload.refresh_token)
 
 
 @router.get(

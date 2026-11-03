@@ -1,5 +1,6 @@
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import uuid4
 
 from jose import JWTError, jwt
 from passlib.context import CryptContext
@@ -30,6 +31,7 @@ def _create_token(
         "type": token_type,
         "iat": now,
         "exp": now + expires_delta,
+        "jti": uuid4().hex,
     }
     if extra_claims:
         payload.update(extra_claims)

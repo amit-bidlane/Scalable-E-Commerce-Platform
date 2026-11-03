@@ -1,1 +1,14 @@
 .env
+.env.*
+!.env.example
+!.env.prod.example
+__pycache__/
+*.py[cod]
+*.pyc.*
+.venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+nginx/certs/*
+!nginx/certs/README.md
