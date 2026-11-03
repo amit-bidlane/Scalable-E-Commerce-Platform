@@ -8,7 +8,7 @@ FastAPI e-commerce backend, work in progress, with:
 - Razorpay and Stripe payment scaffolding
 - RabbitMQ-backed async notifications
 - Prometheus metrics, JSON logging, and Nginx edge config
-- GitHub Actions CI/CD with Docker build and optional EC2 deploy
+- GitHub Actions pipeline: CI runs the tests against Postgres and Redis (not RabbitMQ) and builds the Docker image. It pushes the image to Docker Hub only when the Docker Hub credentials are set. It also has an optional SSH step that runs `docker compose pull` and `docker compose up -d --build` on a host when the three AWS secrets exist. That step does not update the code on the host, so it is not a complete deploy yet.
 
 ## Project Structure
 
