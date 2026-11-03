@@ -1,0 +1,199 @@
+# Production stack. Start with:
+#   docker compose --env-file .env.prod -f docker-compose.prod.yml up -d --build
+# The dev stack stays in docker-compose.yml.
+name: ecommerce-prod
+
+# Docker's default json-file logs have no size limit and can fill a small disk.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+x-app-environment: &app-environment
+  APP_ENV: production
+  LOG_LEVEL: INFO
+  ENABLE_METRICS: "true"
+  POSTGRES_SERVER: db
+  POSTGRES_USER: ${POSTGRES_USER:-ecommerce}
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?must be set}
+  POSTGRES_DB: ${POSTGRES_DB:-ecommerce}
+  JWT_SECRET_KEY: ${JWT_SECRET_KEY:?must be set}
+  JWT_REFRESH_SECRET_KEY: ${JWT_REFRESH_SECRET_KEY:?must be set}
+  REDIS_URL: redis://:${REDIS_PASSWORD:?must be set}@redis:6379/0
+  RABBITMQ_URL: amqp://${RABBITMQ_USER:?must be set}:${RABBITMQ_PASSWORD:?must be set}@rabbitmq:5672/
+  PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-razorpay}
+  PAYMENT_CURRENCY: ${PAYMENT_CURRENCY:-INR}
+  RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+  RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+  RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-}
+  STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+  STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+  STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+
+x-backend-ready: &backend-ready
+  migrate:
+    condition: service_completed_successfully
+  db:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+  rabbitmq:
+    condition: service_healthy
+
+services:
+  # One-shot job: applies the migrations, then exits. Its exit code is its health.
+  migrate:
+    image: scalable-ecommerce-platform:prod
+    pull_policy: never
+    command: ["alembic", "upgrade", "head"]
+    restart: "no"
+    environment: *app-environment
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [backend]
+
+  # The only service with a build section. migrate and worker use the same image.
+  app:
+    build:
+      context: .
+    image: scalable-ecommerce-platform:prod
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - "*"
+    restart: unless-stopped
+    environment:
+      <<: *app-environment
+      PROMETHEUS_MULTIPROC_DIR: /tmp
+    tmpfs:
+      - /tmp
+    depends_on: *backend-ready
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *default-logging
+    networks: [edge, backend]
+
+  worker:
+    image: scalable-ecommerce-platform:prod
+    pull_policy: never
+    command: ["python", "-m", "app.worker"]
+    restart: unless-stopped
+    environment: *app-environment
+    depends_on: *backend-ready
+    # Only shows that the worker process is running, not that it is consuming messages.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import sys; sys.exit(0 if b'app.worker' in open('/proc/1/cmdline', 'rb').read() else 1)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging: *default-logging
+    networks: [backend]
+
+  db:
+    image: postgres:15
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ecommerce}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?must be set}
+      POSTGRES_DB: ${POSTGRES_DB:-ecommerce}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+    networks: [backend]
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # sh -c so the shell expands $REDIS_PASSWORD (written $$ here so compose leaves it alone).
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?must be set}
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?must be set}
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+    networks: [backend]
+
+  rabbitmq:
+    image: rabbitmq:3
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:?must be set}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?must be set}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging: *default-logging
+    networks: [backend]
+
+  # The only service that publishes ports. Config, static files and certificates are mounted read-only.
+  # Put the certificate files in nginx/certs (fullchain.pem and privkey.pem). They are git-ignored.
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on:
+      app:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/static:/usr/share/nginx/html:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --no-check-certificate -O /dev/null https://127.0.0.1/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *default-logging
+    networks: [edge]
+
+networks:
+  # No route to the outside. db, redis and rabbitmq live only here.
+  backend:
+    internal: true
+  # nginx and app. The app needs outbound access for the payment providers.
+  edge:
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:

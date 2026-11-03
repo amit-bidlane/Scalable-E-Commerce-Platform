@@ -1,6 +1,7 @@
 .env
 .env.*
 !.env.example
+!.env.prod.example
 __pycache__/
 *.py[cod]
 *.pyc.*
@@ -9,3 +10,5 @@ __pycache__/
 .pytest_cache/
 .coverage
 htmlcov/
+nginx/certs/*
+!nginx/certs/README.md
