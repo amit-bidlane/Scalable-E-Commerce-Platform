@@ -34,7 +34,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      PYTHON_VERSION: "3.11"
+      PYTHON_VERSION: "3.13"
       PROJECT_NAME: Scalable E-Commerce Platform
       API_V1_STR: /api/v1
       POSTGRES_SERVER: localhost
