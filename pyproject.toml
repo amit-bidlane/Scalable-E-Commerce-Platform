@@ -1,7 +1,7 @@
 [project]
 name = "scalable-ecommerce-platform"
 version = "0.1.0"
-description = "Production-ready FastAPI backend for a scalable e-commerce platform."
+description = "FastAPI e-commerce backend, work in progress."
 requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.116.0,<0.130.0",

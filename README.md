@@ -107,7 +107,7 @@ Coverage is enforced through `pyproject.toml` with:
 - `--cov-report=term-missing`
 - `--cov-fail-under=71`
 
-Measured coverage is about 71%. The gate is set to that real number and will be raised as tests are added. Product routes, `dependencies.py` and the worker are the least covered.
+The coverage gate is 71% and will be raised as tests are added. The last full run measured about 73%; the modules below 60% were `app/worker.py` (0%), `app/api/routes/products.py` (31%), `app/core/messaging.py` (53%), `app/core/cache.py` (58%) and `app/services/payments.py` (59%).
 
 ## Core API Areas
 
