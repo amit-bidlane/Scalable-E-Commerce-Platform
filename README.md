@@ -131,6 +131,15 @@ The coverage gate is 71% and will be raised as tests are added. The last full ru
 
 Admin-only product mutations are protected by RBAC.
 
+### Cart
+
+- `GET /api/v1/cart`
+- `POST /api/v1/cart/items`
+- `PUT /api/v1/cart/items/{product_id}`
+- `DELETE /api/v1/cart/items/{product_id}`
+
+Login is required and the cart is always the caller's own. The cart shows the product's current price and server-computed totals, and a line holds 1 to 99 units. The stock check when adding or changing a line is only a check: nothing is reserved yet.
+
 ### Payments
 
 - `POST /api/v1/orders`

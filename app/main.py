@@ -16,6 +16,7 @@ openapi_tags = [
     {"name": "health", "description": "Operational health and readiness probes."},
     {"name": "auth", "description": "Authentication, token lifecycle, and OAuth scaffolding endpoints."},
     {"name": "products", "description": "Catalog browsing, search, and admin product management endpoints."},
+    {"name": "cart", "description": "The authenticated user's cart: add, change and remove lines, with current prices and totals."},
     {"name": "payments", "description": "Checkout, provider order creation, and payment webhook processing endpoints."},
 ]
 
