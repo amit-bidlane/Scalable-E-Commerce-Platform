@@ -95,11 +95,42 @@ python -m app.worker
 
 ## Testing
 
-Run the full suite:
+The suite needs a throwaway PostgreSQL and Redis on non-default ports. The default ports (5432 and 6379) belong to development containers, and the tests refuse to use them outside CI.
+
+Start them, for example:
 
 ```bash
+docker run -d --name scratch-pg -p 127.0.0.1:54320:5432 \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ecommerce_test postgres:15
+docker run -d --name scratch-redis -p 127.0.0.1:63790:6379 redis:7-alpine
+```
+
+Tell the tests where they are, then run the full suite:
+
+```bash
+export TEST_PG_PORT=54320
+export TEST_REDIS_URL=redis://localhost:63790/5
 pytest
 ```
+
+`tests/conftest.py` reads these variables (defaults in brackets):
+
+- `TEST_PG_HOST` [`localhost`]
+- `TEST_PG_PORT` [`5432`]
+- `TEST_PG_USER` [`postgres`]
+- `TEST_PG_PASSWORD` [`postgres`]
+- `TEST_PG_DB` [`ecommerce_test`]
+- `TEST_REDIS_URL` [`redis://localhost:6379/5`]
+
+The defaults for the two ports are refused, so `TEST_PG_PORT` and `TEST_REDIS_URL` must always be set. Before the app loads, these values are copied into the app's own `POSTGRES_SERVER`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` and `REDIS_URL` settings, so the database and Redis values in `.env` are ignored. Every other setting is still read from `.env`, if it exists. Outside CI the whole run stops with a clear message when:
+
+- the Postgres or Redis port is the default (5432 or 6379)
+- a host is not `localhost`, `127.0.0.1` or `::1`
+- the database name does not contain `test`
+
+The regression tests (`tests/test_regressions.py`) run `DROP SCHEMA public CASCADE` in `TEST_PG_DB` and flush the Redis database in `TEST_REDIS_URL`. Never point these variables at a database you care about.
+
+In CI, GitHub sets `CI`, the workflow sets the `TEST_*` values, and the service containers use the default ports. The checks above are skipped there.
 
 Coverage is enforced through `pyproject.toml` with:
 
