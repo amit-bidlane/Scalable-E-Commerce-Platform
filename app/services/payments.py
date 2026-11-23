@@ -108,6 +108,25 @@ async def process_payment_webhook(
 
     try:
         order, provider_payment_id = await _resolve_order_from_event(normalized_provider, event, session)
+        if order.status == OrderState.CANCELLED:
+            # The order was cancelled, but a payment arrived. The money was taken, so record it for a
+            # manual refund. The status stays CANCELLED, and a payment id that is already stored is
+            # never overwritten. The commit ends the transaction on every path, which frees the row lock.
+            amount_matches = _payment_matches_order(normalized_provider, event, order)
+            if order.provider_payment_id is None:
+                order.provider_payment_id = provider_payment_id
+                order.paid_at = datetime.now(UTC)
+            await session.commit()
+            logger.error(
+                "Payment received for a cancelled order. It needs a manual refund.",
+                extra={
+                    "order_id": order.id,
+                    "payment_provider": normalized_provider,
+                    "provider_payment_id": provider_payment_id,
+                    "amount_matches": amount_matches,
+                },
+            )
+            return False, "Order was cancelled. Payment recorded for a manual refund."
         if order.status == OrderState.PAID:
             return False, "Order already marked as paid."
         if order.status != OrderState.PENDING:
