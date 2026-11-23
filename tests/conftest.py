@@ -60,11 +60,29 @@ def check_settings_match(expected: Mapping[str, str], settings) -> None:
         )
 
 
+# Dummy provider and Google settings. They are assigned, not defaulted, so a value from .env or the shell
+# never reaches a test. A real key could not be sent anywhere anyway: see block_real_provider_calls below.
+DUMMY_PROVIDER_ENV = {
+    "RAZORPAY_KEY_ID": "rzp_test_dummy",
+    "RAZORPAY_KEY_SECRET": "dummy-razorpay-secret",
+    "RAZORPAY_WEBHOOK_SECRET": "dummy-razorpay-webhook-secret",
+    "STRIPE_SECRET_KEY": "sk_test_dummy",
+    "STRIPE_PUBLISHABLE_KEY": "pk_test_dummy",
+    "STRIPE_WEBHOOK_SECRET": "whsec_dummy",
+    "GOOGLE_CLIENT_ID": "dummy-google-client-id",
+    "GOOGLE_CLIENT_SECRET": "dummy-google-client-secret",
+    "PAYMENT_PROVIDER": "razorpay",
+    "PAYMENT_CURRENCY": "INR",
+}
+
 # This must run before `app` is imported, because the app reads its settings at import time.
 _expected_env = resolve_test_env(os.environ)
 os.environ.update(_expected_env)
+os.environ.update(DUMMY_PROVIDER_ENV)
 
 import pytest  # noqa: E402
+import razorpay  # noqa: E402
+import stripe  # noqa: E402
 
 from app.core.cache import redis_cache  # noqa: E402
 from app.core.config import settings  # noqa: E402
@@ -72,6 +90,19 @@ from app.core.messaging import rabbitmq_client  # noqa: E402
 from app.main import app  # noqa: E402
 
 check_settings_match(_expected_env, settings)
+
+
+def _refuse_real_provider_call(*args, **kwargs):
+    raise AssertionError(
+        "A real provider call was attempted in a test. Patch the app's own helper "
+        "(for example payments._create_provider_order) instead."
+    )
+
+
+@pytest.fixture(autouse=True)
+def block_real_provider_calls(monkeypatch):
+    monkeypatch.setattr(razorpay, "Client", _refuse_real_provider_call)
+    monkeypatch.setattr(stripe.PaymentIntent, "create", _refuse_real_provider_call)
 
 
 @pytest.fixture(autouse=True)
