@@ -1,7 +1,7 @@
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Numeric, String, Text
+from sqlalchemy import CheckConstraint, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -15,6 +15,7 @@ if TYPE_CHECKING:
 
 class Product(TimestampMixin, Base):
     __tablename__ = "products"
+    __table_args__ = (CheckConstraint("inventory_count >= 0", name="ck_products_inventory_non_negative"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
