@@ -30,8 +30,15 @@ def _users_line(user_id: int, product_id: int):
 
 
 async def _read_cart(session: AsyncSession, user_id: int) -> CartRead:
-    """The cart with the product's CURRENT price. The unit_price stored on the line is never read by the
-    cart routes; POST /orders still reads it until Task 3 re-prices from the product."""
+    """The cart with each product's current price.
+
+    The unit_price stored on a cart line is not read here, and checkout does not read it either; the cart
+    routes still write it.
+
+    Known limits: submitting checkout twice reserves the stock twice (there is no idempotency key yet), and
+    an abandoned PENDING order keeps its stock (there is no expiry yet). The cart shows the current price
+    when it is read and checkout charges the current price when it runs, so the two can differ if a
+    product's price changes in between."""
     rows = (
         await session.execute(
             select(CartItem.product_id, CartItem.quantity, Product.price)

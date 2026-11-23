@@ -169,7 +169,7 @@ Admin-only product mutations are protected by RBAC.
 - `PUT /api/v1/cart/items/{product_id}`
 - `DELETE /api/v1/cart/items/{product_id}`
 
-Login is required and the cart is always the caller's own. The cart shows the product's current price and server-computed totals, and a line holds 1 to 99 units. The stock check when adding or changing a line is only a check: nothing is reserved yet.
+Login is required and the cart is always the caller's own. The cart shows the product's current price and server-computed totals, and a line holds 1 to 99 units. The stock check when adding or changing a line is only a check: nothing is reserved until checkout (`POST /api/v1/orders`). Checkout charges each product's current price, reserves the stock in the same transaction as the order, and answers 409 naming the items that are short, creating no order. It does not clear the cart.
 
 ### Payments
 
@@ -272,7 +272,7 @@ It does not roll back, and it is not a zero-downtime deploy: the app restarts. N
 ## Next Improvements
 
 - real email provider integration
-- inventory reservation and release flow
+- releasing reserved stock: a cancel endpoint and expiry of unpaid orders (a `cancel_order` service exists, but no route calls it). Until then an abandoned pending order keeps its stock, and submitting checkout twice reserves twice
 - order history endpoints
 - background retry / dead-letter queue strategy
 - Terraform or ECS deployment automation

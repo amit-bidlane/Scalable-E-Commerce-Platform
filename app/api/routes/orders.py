@@ -15,7 +15,12 @@ router = APIRouter(tags=["payments"])
     response_model=PaymentOrderCreateResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Create Checkout Order",
-    description="Creates a local order from the authenticated user's cart and provisions the provider-side payment order or intent.",
+    description=(
+        "Creates a local order from the authenticated user's cart and provisions the provider-side payment order or "
+        "intent. Every line is charged the product's current price, and the stock is reserved in the same "
+        "transaction. If any line is short, the answer is 409 naming the short items, and nothing is created. "
+        "The cart is not cleared."
+    ),
     response_description="Local order data plus payment provider checkout details.",
 )
 async def create_order(
