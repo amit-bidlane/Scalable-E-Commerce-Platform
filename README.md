@@ -95,11 +95,42 @@ python -m app.worker
 
 ## Testing
 
-Run the full suite:
+The suite needs a throwaway PostgreSQL and Redis on non-default ports. The default ports (5432 and 6379) belong to development containers, and the tests refuse to use them outside CI.
+
+Start them, for example:
 
 ```bash
+docker run -d --name scratch-pg -p 127.0.0.1:54320:5432 \
+  -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=ecommerce_test postgres:15
+docker run -d --name scratch-redis -p 127.0.0.1:63790:6379 redis:7-alpine
+```
+
+Tell the tests where they are, then run the full suite:
+
+```bash
+export TEST_PG_PORT=54320
+export TEST_REDIS_URL=redis://localhost:63790/5
 pytest
 ```
+
+`tests/conftest.py` reads these variables (defaults in brackets):
+
+- `TEST_PG_HOST` [`localhost`]
+- `TEST_PG_PORT` [`5432`]
+- `TEST_PG_USER` [`postgres`]
+- `TEST_PG_PASSWORD` [`postgres`]
+- `TEST_PG_DB` [`ecommerce_test`]
+- `TEST_REDIS_URL` [`redis://localhost:6379/5`]
+
+The defaults for the two ports are refused, so `TEST_PG_PORT` and `TEST_REDIS_URL` must always be set. Before the app loads, these values are copied into the app's own `POSTGRES_SERVER`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB` and `REDIS_URL` settings, so the database and Redis values in `.env` are ignored. Every other setting is still read from `.env`, if it exists. Outside CI the whole run stops with a clear message when:
+
+- the Postgres or Redis port is the default (5432 or 6379)
+- a host is not `localhost`, `127.0.0.1` or `::1`
+- the database name does not contain `test`
+
+The regression tests (`tests/test_regressions.py`) run `DROP SCHEMA public CASCADE` in `TEST_PG_DB` and flush the Redis database in `TEST_REDIS_URL`. Never point these variables at a database you care about.
+
+In CI, GitHub sets `CI`, the workflow sets the `TEST_*` values, and the service containers use the default ports. The checks above are skipped there.
 
 Coverage is enforced through `pyproject.toml` with:
 
@@ -130,6 +161,15 @@ The coverage gate is 71% and will be raised as tests are added. The last full ru
 - `DELETE /api/v1/products/{id}`
 
 Admin-only product mutations are protected by RBAC.
+
+### Cart
+
+- `GET /api/v1/cart`
+- `POST /api/v1/cart/items`
+- `PUT /api/v1/cart/items/{product_id}`
+- `DELETE /api/v1/cart/items/{product_id}`
+
+Login is required and the cart is always the caller's own. The cart shows the product's current price and server-computed totals, and a line holds 1 to 99 units. The stock check when adding or changing a line is only a check: nothing is reserved until checkout (`POST /api/v1/orders`). Checkout charges each product's current price, reserves the stock in the same transaction as the order, and answers 409 naming the items that are short, creating no order. It does not clear the cart.
 
 ### Payments
 
@@ -232,7 +272,7 @@ It does not roll back, and it is not a zero-downtime deploy: the app restarts. N
 ## Next Improvements
 
 - real email provider integration
-- inventory reservation and release flow
+- releasing reserved stock: a cancel endpoint and expiry of unpaid orders (a `cancel_order` service exists, but no route calls it). Until then an abandoned pending order keeps its stock, and submitting checkout twice reserves twice
 - order history endpoints
 - background retry / dead-letter queue strategy
 - Terraform or ECS deployment automation

@@ -132,3 +132,33 @@ def test_create_provider_order_rejects_unknown_provider() -> None:
         payment_service._create_provider_order(provider="unknown", order=order)
 
     assert exc.value.status_code == 400
+
+
+def test_razorpay_order_call_has_a_timeout(monkeypatch) -> None:
+    """The Razorpay SDK waits forever unless it is given a timeout, and checkout holds its product locks
+    during this call. A fake client replaces the one the test setup blocks."""
+    recorded = {}
+
+    class FakeOrders:
+        def create(self, data, **kwargs):
+            recorded["kwargs"] = kwargs
+            return {"id": "order_timeout_test"}
+
+    class FakeClient:
+        def __init__(self, auth):
+            self.order = FakeOrders()
+
+    monkeypatch.setattr(payment_service.razorpay, "Client", FakeClient)
+    order = Order(
+        id=7,
+        user_id=1,
+        status=OrderState.PENDING,
+        payment_provider="razorpay",
+        total_amount=Decimal("10.00"),
+        shipping_address="12 Test Street",
+    )
+
+    result = payment_service._create_razorpay_order(order)
+
+    assert result["provider_order_id"] == "order_timeout_test"
+    assert recorded["kwargs"] == {"timeout": 10}

@@ -9,7 +9,7 @@ import razorpay
 import stripe
 from fastapi import HTTPException, status
 from redis.exceptions import RedisError
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -17,8 +17,9 @@ from app.core.cache import redis_cache
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.core.messaging import rabbitmq_client
-from app.models.cart import Cart
+from app.models.cart import Cart, CartItem
 from app.models.order import Order, OrderItem, OrderState
+from app.models.product import Product
 from app.models.user import User
 from app.schemas.notification import OrderPaidNotification
 from app.schemas.order import OrderCreateRequest, OrderRead, PaymentOrderCreateResponse
@@ -37,9 +38,24 @@ async def create_payment_order(
     current_user: User,
 ) -> PaymentOrderCreateResponse:
     provider = (payload.provider or settings.payment_provider).lower()
-    cart = await _get_cart_for_checkout(session, current_user.id)
-    total_amount = sum((item.unit_price * item.quantity for item in cart.items), start=Decimal("0.00"))
+    # The product rows are locked here, in id order, until the transaction ends. The prices and the stock
+    # below are read from those locked rows, never from the cart's stored unit_price.
+    lines = await _get_cart_for_checkout(session, current_user.id)
+    short = [
+        {"product_id": line.product_id, "requested": line.quantity, "available": line.inventory_count}
+        for line in lines
+        if line.quantity > line.inventory_count
+    ]
+    if short:
+        # Nothing has been written, and the session is closed without a commit.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail={"message": "Not enough stock", "items": short}
+        )
+    total_amount = sum((line.price * line.quantity for line in lines), start=Decimal("0.00"))
 
+    # Lock order, for all code: the order row first, then the product rows in id order. The one exception is
+    # here: an order row created by the same transaction is locked after the products, because no other
+    # transaction can see it before commit.
     order = Order(
         user_id=current_user.id,
         status=OrderState.PENDING,
@@ -47,16 +63,21 @@ async def create_payment_order(
         total_amount=total_amount,
         shipping_address=payload.shipping_address,
         items=[
-            OrderItem(
-                product_id=item.product_id,
-                quantity=item.quantity,
-                unit_price=item.unit_price,
-            )
-            for item in cart.items
+            OrderItem(product_id=line.product_id, quantity=line.quantity, unit_price=line.price)
+            for line in lines
         ],
     )
     session.add(order)
     await session.flush()
+
+    # Reserve the stock. This mirrors cancel_order and reads the same order items, so a cancel gives back
+    # exactly what was taken here.
+    await session.execute(
+        update(Product)
+        .where(Product.id == OrderItem.product_id, OrderItem.order_id == order.id)
+        .values(inventory_count=Product.inventory_count - OrderItem.quantity)
+        .execution_options(synchronize_session=False)
+    )
 
     provider_response = _create_provider_order(provider=provider, order=order)
     order.provider_order_id = provider_response["provider_order_id"]
@@ -108,6 +129,25 @@ async def process_payment_webhook(
 
     try:
         order, provider_payment_id = await _resolve_order_from_event(normalized_provider, event, session)
+        if order.status == OrderState.CANCELLED:
+            # The order was cancelled, but a payment arrived. The money was taken, so record it for a
+            # manual refund. The status stays CANCELLED, and a payment id that is already stored is
+            # never overwritten. The commit ends the transaction on every path, which frees the row lock.
+            amount_matches = _payment_matches_order(normalized_provider, event, order)
+            if order.provider_payment_id is None:
+                order.provider_payment_id = provider_payment_id
+                order.paid_at = datetime.now(UTC)
+            await session.commit()
+            logger.error(
+                "Payment received for a cancelled order. It needs a manual refund.",
+                extra={
+                    "order_id": order.id,
+                    "payment_provider": normalized_provider,
+                    "provider_payment_id": provider_payment_id,
+                    "amount_matches": amount_matches,
+                },
+            )
+            return False, "Order was cancelled. Payment recorded for a manual refund."
         if order.status == OrderState.PAID:
             return False, "Order already marked as paid."
         if order.status != OrderState.PENDING:
@@ -150,6 +190,11 @@ def _create_provider_order(*, provider: str, order: Order) -> dict[str, str]:
     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unsupported payment provider.")
 
 
+# The Razorpay SDK waits forever unless it is given a timeout. Checkout holds its product locks, and blocks
+# the event loop, during this call.
+PROVIDER_TIMEOUT_SECONDS = 10
+
+
 def _create_razorpay_order(order: Order) -> dict[str, str]:
     if not settings.razorpay_key_id or not settings.razorpay_key_secret:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Razorpay is not configured.")
@@ -161,7 +206,8 @@ def _create_razorpay_order(order: Order) -> dict[str, str]:
             "currency": settings.payment_currency,
             "receipt": f"order-{order.id}",
             "notes": {"local_order_id": str(order.id)},
-        }
+        },
+        timeout=PROVIDER_TIMEOUT_SECONDS,
     )
     return {
         "provider_order_id": response["id"],
@@ -296,16 +342,24 @@ async def _fetch_order_with_user(session: AsyncSession, order_id: int) -> Order:
     return order
 
 
-async def _get_cart_for_checkout(session: AsyncSession, user_id: int) -> Cart:
+async def _get_cart_for_checkout(session: AsyncSession, user_id: int):
+    """The user's cart lines with each product's current price and stock, with the product rows locked.
+
+    One query, ordered by product id: products are always locked in id order (the order cancel_order uses
+    too), so two checkouts, or a checkout and a cancel, that share products cannot deadlock.
+    """
     result = await session.execute(
-        select(Cart)
-        .options(selectinload(Cart.items))
+        select(CartItem.product_id, CartItem.quantity, Product.price, Product.inventory_count)
+        .join(Cart, Cart.id == CartItem.cart_id)
+        .join(Product, Product.id == CartItem.product_id)
         .where(Cart.user_id == user_id)
+        .order_by(Product.id)
+        .with_for_update(of=Product)
     )
-    cart = result.scalar_one_or_none()
-    if cart is None or not cart.items:
+    lines = result.all()
+    if not lines:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cart is empty.")
-    return cart
+    return lines
 
 
 def _payment_matches_order(provider: str, event: dict[str, Any], order: Order) -> bool:
